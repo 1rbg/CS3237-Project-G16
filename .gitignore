@@ -1,2 +1,7 @@
 
 esp32-sensors-actuators/libraries/.DS_Store
+.DS_Store
+.vscode/c_cpp_properties.json
+.DS_Store
+esp32-sensors-actuators/.DS_Store
+esp32-sensors-actuators/libraries/ADS1115_WE/.DS_Store

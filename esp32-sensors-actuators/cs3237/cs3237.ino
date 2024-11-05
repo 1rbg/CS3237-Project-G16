@@ -11,25 +11,27 @@ const char *pass = "fmkz9731";
 
 char *server = "mqtt://192.168.237.245:1883";
 
-char *subscribeTopic = "tray-return/actuate";
-char *publishTopic = "tray-return/sensor";
+char *subscribeTopic = "tray-return/actuate"; // bird detected
+char *publishTopic = "tray-return/sensor"; 
 
 unsigned long previousMillis = 0;    // Stores the last time the function was called
 const long interval = 5000;
 
 ESP32MQTTClient mqttClient;
 
-#define NUM_LEDS 4         // Number of LEDs on the strip
-#define NUM_TRAYS 4        // Number of trays
-#define DATA_PIN 33        // LED data pin
-#define BUZZER_PIN 32      // Buzzer pin
-#define I2C_ADDRESS 0x48   // I2C address of ADS1115
+#define NUM_LEDS 4          // Number of LEDs on the strip
+#define NUM_TRAYS 8         // Number of trays
+#define DATA_PIN 33         // LED data pin
+#define BUZZER_PIN 32       // Buzzer pin
+#define I2C_ADDRESS_1 0x48  // I2C address of ADS1115
+#define I2C_ADDRESS_2  0x4A // I2C address of ADS1115 + SDA shorted to ADDR
 
 CRGBArray<NUM_LEDS> leds;
-ADS1115_WE adc = ADS1115_WE(I2C_ADDRESS);
+ADS1115_WE adc_1 = ADS1115_WE(I2C_ADDRESS_1);
+ADS1115_WE adc_2 = ADS1115_WE(I2C_ADDRESS_2);
 
-float voltageArray[4];
-const float threshold = 1.20;
+float voltageArray[NUM_TRAYS];
+const float threshold = 0.20;   //change as needed
 volatile int trayFilled = 0;
 
 enum State { // add more as needed
@@ -38,7 +40,77 @@ enum State { // add more as needed
 };
 State currentState = idle;
 
-void ledModule() {
+void setup() {
+  FastLED.addLeds<NEOPIXEL, DATA_PIN>(leds, NUM_LEDS);
+  Wire.begin();
+  Serial.begin(115200);
+  ADSsetup();
+  // WIFIsetup();
+}
+
+void ADSsetup() {
+  if (!adc_1.init()) { Serial.println("ADS1115_1 not connected!"); }
+  if (!adc_2.init()) { Serial.println("ADS1115_2 not connected!"); }
+  adc_1.setVoltageRange_mV(ADS1115_RANGE_6144);     // Set voltage range
+  adc_1.setMeasureMode(ADS1115_CONTINUOUS);         // Set continuous measure mode
+  adc_2.setVoltageRange_mV(ADS1115_RANGE_6144);     // Set voltage range
+  adc_2.setMeasureMode(ADS1115_CONTINUOUS);         // Set continuous measure mode
+}
+
+void WIFIsetup() {
+  mqttClient.setURI(server);
+  mqttClient.enableLastWillMessage("lwt", "I am going offline");
+  mqttClient.setKeepAlive(30);
+  WiFi.begin(ssid, pass);
+  WiFi.setHostname("esp32-sensors-actuators");
+  mqttClient.loopStart();
+  while (!mqttClient.isConnected()) {};
+}
+
+void sendMQTT() {
+  if (mqttClient.isConnected()) {
+    String trayFilledStr = String(trayFilled);
+    mqttClient.publish(publishTopic, trayFilledStr, 0, false);
+    Serial.println("MQTT message sent!");
+  }
+}
+
+void onMqttConnect(esp_mqtt_client_handle_t client) {
+  if (mqttClient.isMyTurn(client))
+  {
+    mqttClient.subscribe(subscribeTopic, [](const String &payload) {
+      Serial.println(payload);
+      if (payload == "bird") {
+        currentState = State::bird;
+      } else if (payload == "idle") {
+        currentState = State::idle;
+      } 
+    });
+  }
+}
+
+void handleMQTT(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data) {
+  auto *event = static_cast<esp_mqtt_event_handle_t>(event_data);
+  mqttClient.onEventCallback(event);
+}
+
+void stateCheck() {
+  ledModule();
+  buzzerModule();
+}
+
+void loop() {
+  readFSRs();
+  readSerialInput();
+  stateCheck();
+  unsigned long currentMillis = millis();
+  // Check if the interval has passed
+  if (currentMillis - previousMillis >= interval) {
+    previousMillis = currentMillis;
+    sendMQTT();
+  }
+}
+void ledModule() {  //TODO: make blink fast
   static uint8_t hue = 0;
   uint8_t brightness = (currentState == State::bird) ? 100 : 0; // Set brightness based on state
   leds.fill_solid(CHSV(0, 255, brightness));
@@ -54,20 +126,22 @@ void buzzerModule() {
   }
 }
 
-float readChannel(ADS1115_MUX channel) {
-  adc.setCompareChannels(channel);
-  return adc.getResult_V();
+float readchannel(ADS1115_MUX channel, ADS1115_WE adc_num) {
+  adc_num.setCompareChannels(channel);
+  return adc_num.getResult_V();
 }
 
 void readFSRs() {
-  trayFilled = 0;
-  voltageArray[0] = readChannel(ADS1115_COMP_0_GND);
-  voltageArray[1] = readChannel(ADS1115_COMP_1_GND);
-  voltageArray[2] = readChannel(ADS1115_COMP_2_GND);
-  voltageArray[3] = readChannel(ADS1115_COMP_3_GND);
-  delay(100);  // Adjust as necessary
+  voltageArray[0] = readchannel(ADS1115_COMP_0_GND, adc_1);
+  voltageArray[1] = readchannel(ADS1115_COMP_1_GND, adc_1);
+  voltageArray[2] = readchannel(ADS1115_COMP_2_GND, adc_1);
+  voltageArray[3] = readchannel(ADS1115_COMP_3_GND, adc_1);
+  voltageArray[4] = readchannel(ADS1115_COMP_0_GND, adc_2);
+  voltageArray[5] = readchannel(ADS1115_COMP_1_GND, adc_2);
+  voltageArray[6] = readchannel(ADS1115_COMP_2_GND, adc_2);
+  voltageArray[7] = readchannel(ADS1115_COMP_3_GND, adc_2);
 
-  for (int i = 0; i < NUM_TRAYS; i++) { // can remove
+  for (int i = 0; i < NUM_TRAYS; i++) { 
     Serial.print(i);
     Serial.print(": ");
     Serial.println(voltageArray[i]);
@@ -86,63 +160,4 @@ void readSerialInput() {
       currentState = State::idle;
     }
   }
-}
-
-void setup() {
-  FastLED.addLeds<NEOPIXEL, DATA_PIN>(leds, NUM_LEDS);
-  Wire.begin();
-  Serial.begin(115200);
-  if (!adc.init()) {
-    Serial.println("ADS1115 not connected!");
-  }
-  adc.setVoltageRange_mV(ADS1115_RANGE_6144);     // Set voltage range
-  adc.setMeasureMode(ADS1115_CONTINUOUS);         // Set continuous measure mode
-
-  mqttClient.setURI(server);
-  mqttClient.enableLastWillMessage("lwt", "I am going offline");
-  mqttClient.setKeepAlive(30);
-  WiFi.begin(ssid, pass);
-  WiFi.setHostname("esp32-sensors-actuators");
-  mqttClient.loopStart();
-}
-
-void sendMQTT() {
-  if (mqttClient.isConnected()) {
-    String trayFilledStr = String(trayFilled);
-    mqttClient.publish(subscribeTopic, trayFilledStr, 0, false);
-    Serial.println("MQTT message sent!");
-  }
-}
-
-void loop() {
-  readFSRs();
-  readSerialInput();
-  buzzerModule();
-  ledModule();
-  unsigned long currentMillis = millis();
-
-  // Check if the interval has passed
-  if (currentMillis - previousMillis >= interval) {
-    previousMillis = currentMillis;
-    sendMQTT();
-  }
-}
-
-void onMqttConnect(esp_mqtt_client_handle_t client) {
-    if (mqttClient.isMyTurn(client))
-    {
-        mqttClient.subscribe(subscribeTopic, [](const String &payload) {
-            Serial.println(payload);
-            if (payload == "bird") {
-              currentState = State::bird;
-            } else if (payload == "idle") {
-              currentState = State::idle;
-            }
-        });
-    }
-}
-
-void handleMQTT(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data) {
-  auto *event = static_cast<esp_mqtt_event_handle_t>(event_data);
-  mqttClient.onEventCallback(event);
 }
