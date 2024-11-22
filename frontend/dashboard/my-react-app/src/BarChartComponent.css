@@ -1,0 +1,20 @@
+/* CSS Pulse Animation for Glowing Effect */
+@keyframes pulse {
+	0% {
+		opacity: 0.8;
+		box-shadow: 0 0 10px rgba(255, 99, 132, 1); /* Red glow */
+	}
+	50% {
+		opacity: 0.4;
+		box-shadow: 0 0 25px rgba(255, 99, 132, 1); /* Brighter glow */
+	}
+	100% {
+		opacity: 0.8;
+		box-shadow: 0 0 10px rgba(255, 99, 132, 1); /* Normal glow */
+	}
+}
+
+/* Apply the pulse animation to elements with the 'pulse' class */
+.pulse {
+	animation: pulse 2s infinite ease-in-out;
+}
