@@ -1,0 +1,25 @@
+/* LiveStatus.css */
+
+.live-status {
+	display: flex;
+	font-size: 24px;
+	font-weight: bold;
+}
+
+.blinking-text {
+	color: #ff0000; /* Red color for the "Live" text */
+	animation: blink 2s infinite; /* Slower blink with 2 seconds duration */
+}
+
+/* Keyframe animation for blinking */
+@keyframes blink {
+	0% {
+		opacity: 1;
+	}
+	50% {
+		opacity: 0.3;
+	}
+	100% {
+		opacity: 1;
+	}
+}
